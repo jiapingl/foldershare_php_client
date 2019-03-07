@@ -1,0 +1,451 @@
+#!/bin/bash
+#
+# @file
+# Test the FolderShare command-line web services application.
+
+#------------------------------------------------------------------------
+# Run parameters. Edit these to test a specific host and account.
+#------------------------------------------------------------------------
+
+# The host to test.
+HOST="localhost:8888"
+
+# The user account to use on that host.
+USERNAME="admin"
+PASSWORD="admin"
+
+# The location of the web services client.
+APP="./foldershare"
+
+
+#------------------------------------------------------------------------
+# Internal constants.
+#------------------------------------------------------------------------
+
+# Colors for outupload.
+SECTION_START="[36m"
+SECTION_END="[0m"
+TEST_START="[4m"
+TEST_END="[0m"
+OUTPUT_START="[32;14m"
+OUTPUT_END="[0m"
+ERROR_START="[9m"
+ERROR_END="[0m"
+
+# The initial part of the command line.
+FS="$APP --host $HOST --username $USERNAME --password $PASSWORD"
+
+
+#------------------------------------------------------------------------
+# Functions.
+#------------------------------------------------------------------------
+
+# Runs a test.
+#
+# The command name and arguments are printed, the command executed,
+# and the exit status checked. If the status is non-zero, the application
+# exits.
+#
+# @param args...
+#   One or more command arguments.
+test() {
+  local cmd=$@
+  echo "$TEST_START$cmd$TEST_END"
+  $FS $cmd > tmp.out 2>&1
+  status=$?
+  if [ $status -ne 0  ]; then
+    /bin/echo -n "$ERROR_START"
+    cat tmp.out
+    /bin/echo -n "$ERROR_END"
+    rm -f tmp.out
+    exit $status
+  fi
+  /bin/echo -n $OUTPUT_START
+  cat tmp.out
+  /bin/echo -n $OUTPUT_END
+  rm -f tmp.out
+}
+
+testsilent() {
+  local cmd=$@
+  $FS $cmd > /dev/null 2>&1
+}
+
+section() {
+  echo ""
+  echo ""
+  echo "$SECTION_START$@$SECTION_END"
+  echo "$SECTION_START------------------------------------------------------------------------$SECTION_END"
+}
+
+subsection() {
+  echo ""
+  echo "$SECTION_START$@$SECTION_END"
+}
+
+
+#------------------------------------------------------------------------
+# Command-line parse.
+#------------------------------------------------------------------------
+
+if [ $# -eq 0 ]; then
+    testName="all"
+else
+    if [ $1 = "-help" -o $1 = "--help" ]; then
+        echo "Usage is:  $0 [testname]"
+        echo "Available tests are grouped by type of HTTP operation:"
+        echo "  GET operations"
+        echo "    config    (GET get-config)"
+        echo "    stat      (GET get-entity)"
+        echo "    usage     (GET get-usage)"
+        echo "    version   (GET get-version)"
+        echo "    download  (GET via download form)"
+        echo "  POST operations"
+        echo "    mkdir     (POST new-rootfolder, new-rootfolder)"
+        echo "    upload    (POST new-rootfile, new-rootfolder)"
+        echo "  DELETE operations"
+        echo "    rm        (DELETE delete-file, delete-folder, delete-folder-tree, delete-file-or-folder"
+        echo "    rmdir     (DELETE delete-folder)"
+        echo "  PATCH operations"
+        echo "    cp        (PATCH copy-moverwrite, copy-no-overwrite)"
+        echo "    mv        (PATCH move-overwrite, move-no-overwrite)"
+        echo "    update    (PATCH update-entity)"
+        echo ""
+        echo "The 'all' test name runs all of the tests in a predetermined sequence."
+        echo "Omitting a test name defaults to 'all'."
+        exit 1
+    fi
+    testName=$1
+fi
+
+
+#------------------------------------------------------------------------
+# GET operations.
+#------------------------------------------------------------------------
+
+# Show server version
+if [ $testName = "all" -o $testName = "version" ]; then
+    section "Version"
+    test --version
+    test version
+fi
+
+# Show server configuration
+if [ $testName = "all" -o $testName = "config" ]; then
+    section "Config"
+    test config
+fi
+
+# Show server usage
+if [ $testName = "all" -o $testName = "usage" ]; then
+    section "Usage"
+    test usage
+fi
+
+# Stat
+if [ $testName = "all" -o $testName = "stat" ]; then
+    section "Stat"
+    testsilent rm -rf /folder
+    testsilent rm -f /file.txt
+    touch file.txt
+
+    subsection "Stat on root"
+    test stat /
+    test stat personal:/
+    test stat public:/
+    test stat personal://1/
+    test stat public://1/
+    test stat personal://admin/
+    test stat public://admin/
+    test stat -t /
+    test stat --terse /
+
+    subsection "Stat on folder"
+    test mkdir /folder
+    test stat /folder
+    test stat -t /folder
+
+    test mkdir /folder/subfolder
+    test stat /folder/subfolder
+    test stat -t /folder/subfolder
+
+    subsection "Stat on file"
+    test upload -v file.txt /
+    test stat /file.txt
+    test stat -t /file.txt
+
+    test upload -v file.txt /folder
+    test stat /folder/file.txt
+    test stat -t /folder/file.txt
+
+    test upload -v file.txt /folder/subfolder
+    test stat /folder/subfolder/file.txt
+    test stat -t /folder/subfolder/file.txt
+
+    testsilent rm -rf /folder
+    testsilent rm -f /file.txt
+    rm -f file.txt
+fi
+
+# List
+if [ $testName = "all" -o $testName = "ls" ]; then
+    section "ls"
+    testsilent rm -rf /folder
+    testsilent rm -f /file.txt
+    touch file.txt
+
+    subsection "Ls on root"
+    test ls /
+    test ls -d /
+    test ls -F /
+    test ls -i /
+    test ls -l /
+    test ls -s /
+    test ls -S /
+    test ls -t /
+    test ls -silFS /
+
+    subsection "Ls on subfolder"
+    test mkdir /folder
+    test ls -l /folder
+
+    test mkdir /folder/subfolder
+    test ls -l /folder/subfolder
+
+    subsection "Ls on file"
+    test upload -v file.txt /
+    test ls -l /file.txt
+
+    test upload -v file.txt /folder
+    test ls -l /folder/file.txt
+
+    test upload -v file.txt /folder/subfolder
+    test ls -l /folder/subfolder/file.txt
+
+    subsection "Ls recursive"
+    test ls -R /
+
+    testsilent rm -rf /folder
+    testsilent rm -f /file.txt
+    rm -f file.txt
+fi
+
+# Download files
+if [ $testName = "all" -o $testName = "download" ]; then
+    section "download"
+    testsilent mkdir /folder
+    testsilent mkdir /folder/subfolder
+    touch file.txt
+    testsilent upload file.txt /
+    testsilent upload file.txt /folder
+    testsilent upload file.txt /folder/subfolder
+    rm -f file.txt
+
+    subsection "Download file"
+    test download -v /file.txt
+    if [ ! -e file.txt ]; then
+        echo "Error: file did not download"
+    fi
+    rm -f file.txt
+
+    test download -v /folder/file.txt
+    if [ ! -e file.txt ]; then
+        echo "Error: file did not download"
+    fi
+    rm -f file.txt
+
+    test download -v /folder/subfolder/file.txt
+    if [ ! -e file.txt ]; then
+        echo "Error: file did not download"
+    fi
+    rm -f file.txt
+
+    subsection "Download folder"
+    test download -v /folder/subfolder
+    if [ ! -e subfolder.zip ]; then
+        echo "Error: folder did not download"
+    fi
+    rm -f subfolder.zip
+
+    test download -v /folder
+    if [ ! -e folder.zip ]; then
+        echo "Error: folder did not download"
+    fi
+    rm -f folder.zip
+
+    testsilent rm -rf /folder
+    testsilent rm -f /file.txt
+fi
+
+
+#------------------------------------------------------------------------
+# POST operations.
+#------------------------------------------------------------------------
+
+# Make folders
+if [ $testName = "all" -o $testName = "mkdir" ]; then
+    testsilent rm -rf /folder /folder1 /folder2 /folder3
+
+    section "mkdir"
+    subsection "Mkdir"
+    test mkdir -v /folder
+    test mkdir -v /folder1 /folder2 /folder3
+    test ls -l /
+
+    test mkdir -v /folder/subfolder
+    test ls -l /folder
+
+    test mkdir -v /folder1/subfolder1 /folder1/subfolder2
+    test ls -l /folder1
+
+    testsilent rm -rf /folder /folder1 /folder2 /folder3
+fi
+
+# Upload files
+if [ $testName = "all" -o $testName = "upload" ]; then
+    testsilent rm -rf /folder /localfolder /remotefolder
+    testsilent rm -f /file.txt
+    testsilent mkdir -v /folder /folder/subfolder
+    touch file.txt
+    mkdir localfolder localfolder/sub1 localfolder/sub1/sub2
+    touch localfolder/file1.txt
+    touch localfolder/file2.txt
+    touch localfolder/sub1/file3.txt
+    touch localfolder/sub1/file4.txt
+    touch localfolder/sub1/sub2/file5.txt
+
+    subsection "Upload file"
+    test upload -v file.txt /
+    test upload -v file.txt /folder
+    test upload -v file.txt /folder/subfolder
+
+    subsection "Upload folder"
+    test upload -v localfolder /
+    test mkdir /remotefolder
+    test upload -v localfolder /remotefolder
+
+    testsilent rm -rf /folder /localfolder /remotefolder
+    testsilent rm -f /file.txt
+    rm -f file.txt
+    rm -rf localfolder
+fi
+
+
+#------------------------------------------------------------------------
+# DELETE operations.
+#------------------------------------------------------------------------
+
+# Remove empty folders
+if [ $testName = "all" -o $testName = "rmdir" ]; then
+    section "rmdir"
+    testsilent rm -rf /folder
+    testsilent mkdir -v /folder /folder/subfolder1 /folder/subfolder2
+
+    subsection "Remove empty folders"
+    test rmdir -v /folder/subfolder2
+    test rmdir -v /folder/subfolder1
+    test rmdir -v /folder
+fi
+
+# Remove
+if [ $testName = "all" -o $testName = "rm" ]; then
+    section "rm"
+    testsilent mkdir -v /folder /folder/subfolder1 /folder/subfolder2
+    touch file.txt
+    testsilent upload file.txt /
+    testsilent upload file.txt /folder
+    testsilent upload file.txt /folder/subfolder1
+    rm -f file.txt
+
+    subsection "Remove empty folder"
+    test rm -d /folder/subfolder2
+
+    subsection "Remove non-empty folder"
+    test rm -rf /folder/subfolder1
+    test rm -rf /folder
+
+    subsection "Remove file"
+    test rm /file.txt
+fi
+
+
+#------------------------------------------------------------------------
+# PATCH operations.
+#------------------------------------------------------------------------
+
+# Copy
+if [ $testName = "all" -o $testName = "cp" ]; then
+    section "cp"
+    testsilent rm -rf /folder
+    testsilent mkdir /folder
+    touch file.txt
+    testsilent rm -f /file.txt
+    testsilent upload file.txt /
+    testsilent upload file.txt /folder
+    rm -f file.txt
+
+    subsection "Copy file"
+    test cp -v /file.txt /copyfile.txt
+    test cp -v /file.txt /folder
+    test cp -v /file.txt /folder/copyfile.txt
+    test cp -v /folder/copyfile.txt /copyfile2.txt
+
+    subsection "Copy folder"
+    test cp -v /folder /copyfolder
+    test cp -v /folder /copyfolder
+
+    # Cleanup.
+    testsilent rm -rf /folder /copyfolder /file.txt /copyfile.txt /copyfile2.txt
+fi
+
+# Move
+if [ $testName = "all" -o $testName = "mv" ]; then
+    section "mv"
+    testsilent rm -rf /folder
+    testsilent mkdir /folder /folder/subfolder
+    touch file.txt
+    testsilent rm -f /file.txt
+    testsilent upload file.txt /
+    testsilent upload file.txt /folder
+    rm -f file.txt
+
+    subsection "Rename file"
+    test mv -v /file.txt /renamed.txt
+    test mv -v /folder/file.txt /folder/renamed.txt
+
+    subsection "Rename folder"
+    test mv -v /folder/subfolder /folder/renamedsubfolder
+    test mv -v /folder /renamedfolder
+
+    subsection "Move file"
+    test mv -v /renamed.txt /renamedfolder/renamedsubfolder
+    test mv -v /renamedfolder/renamed.txt /
+
+    subsection "Move folder"
+    test mv -v /renamedfolder/renamedsubfolder /
+    test mv -v /renamedsubfolder /renamedfolder/subfolder
+
+    testsilent rm -rf /renamedfolder /renamed.txt
+fi
+
+# Update
+if [ $testName = "all" -o $testName = "update" ]; then
+    section "update"
+    testsilent rm -rf /folder
+    testsilent mkdir /folder
+    touch file.txt
+    testsilent rm -f /file.txt
+    testsilent upload file.txt /
+    rm -f file.txt
+
+    subsection "Update name"
+    test update name "updatedfile.txt" /file.txt
+    test update name "updatedfolder" /folder
+    test ls -l /
+
+    subsection "Update description"
+    test update description "description" /updatedfile.txt
+    test update description "description" /updatedfolder
+
+    testsilent rm -rf /updatedfile.txt /updatedfolder
+fi
